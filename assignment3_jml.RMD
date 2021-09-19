@@ -1,0 +1,287 @@
+---
+title: "assignment3_jml"
+author: "Jahred Liddie"
+date: "9/18/2021"
+output: html_document
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+# load packages per tutorial
+library(sf)
+library(tidyverse)
+library(ggthemes)
+library(ggspatial)
+library(units)
+library(nngeo)
+library(kableExtra) # for making nice tables
+
+# load data
+bus <- st_read("MBTA_Bus_Stops.geojson", quiet = TRUE) # points: bus stops
+
+tracts <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/4a8eb4fb3be44ed5a1eec28551b9f3b2_0.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D", quiet = TRUE) # polgyon: census tracts
+
+nhoods <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/3525b0ee6e6b427f9aab5d0a1d0a1a28_0.kml", quiet = TRUE) # polygon: boston nhoods
+
+schools <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/1d9509a8b2fd485d9ad471ba2fdb1f90_0.geojson?outSR=%7B%22latestWkid%22%3A2249%2C%22wkid%22%3A102686%7D", quiet = TRUE)
+
+water <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/2b3c0fa13b1c468eb702a3645fcc6bcb_5.kml", quiet = TRUE)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Transforming data
+Transform relevant data to the Massachusetts State Plane system.
+```{r}
+MA_state_plane <- "+proj=lcc +lat_1=41.71666666666667 +lat_2=42.68333333333333 +lat_0=41 +lon_0=-71.5 +x_0=200000 +y_0=750000 +ellps=GRS80 +units=m +no_defs"
+
+nhoods <- nhoods %>%
+  st_transform(MA_state_plane)
+
+water <- water %>%
+  st_transform(MA_state_plane)
+
+tracts <- tracts %>%
+  st_transform(MA_state_plane)
+
+bus <- bus %>%
+  st_transform(MA_state_plane)
+
+schools <- schools %>%
+  st_transform(MA_state_plane)
+
+```
+
+Then, trim bus stops to be just within Boston.
+```{r, message = FALSE, warning = FALSE}
+# check validity of geometry before intersecting
+sum(st_is_valid(bus)==F)
+sum(st_is_valid(nhoods)==F)
+
+# make nhoods valid
+nhoods.valid <- st_make_valid(nhoods)
+
+# # compare nhoods
+# ggplot(nhoods.valid) +
+#   geom_sf() 
+# 
+# ggplot(nhoods) +
+#   geom_sf()
+
+# intersection of bus dataset with Boston neighborhoods
+bus_boston <- st_intersection(nhoods.valid, bus)
+
+# map of new bus dataset
+ggplot(nhoods) +
+  geom_sf() +
+  geom_sf(data = bus_boston, size = 0.1, color = "black")
+
+```
+  
+Basic map of bus stops (black) and public schools (red).  
+
+```{r}
+
+ggplot(water) +
+  geom_sf(fill = "lightblue", color = NA) +
+  geom_sf(data = bus_boston, color = "black", size = 0.1) +
+  geom_sf(data = schools, size = 1, color = "red") +
+  geom_sf(data= nhoods, fill = NA, color = "gray") +
+  theme_map() +
+  annotation_scale()
+
+```
+
+# Creating buffers
+Create buffers around schools and subset bus stops to the buffers
+```{r}
+schools_buffer <- st_buffer(schools, dist = 250) %>%
+  st_union() # 250 m buffers around public schools
+
+# # map of buffers
+# ggplot(schools_buffer) +
+#   geom_sf() +
+#   theme_map()
+
+bus_schools <- bus_boston[schools_buffer,]
+
+ggplot(schools_buffer) +
+  geom_sf() +
+  geom_sf(data = bus_schools, 
+          color = "black",
+          size = 0.1) +
+  theme_map()
+
+```
+
+# Map 1
+Number and proportion of bus stops within 250 meters of Boston public schools [question 1].
+```{r}
+# join buffers with bus data
+bus_boston <- bus_boston %>%
+  st_join(bus_schools) %>%
+  mutate(by_schools = !is.na(Name.y)) # indicator of being in buffers
+
+
+# number and proportion in buffers
+n_bus_schools <- sum(bus_boston$by_schools)
+pct_bus_schools <- sum(bus_boston$by_schools) / length(bus_boston$by_schools)
+
+bus_boston %>% st_drop_geometry %>% summarise( # drop sf for output
+  "Number of bus stops within 250 m buffers" = sum(by_schools),
+  "Proportion of bus stops in 250 m buffers" = round(sum(by_schools)/n(), 3)*100
+)
+
+```
+  
+  
+So, 571 Boston bus stops are within 250 meters of a public school, representing 25.9% of all bus stops in Boston.
+  
+  
+**Map 1:**
+```{r, fig.width=6, fig.height=6}
+left_side  <- st_bbox(bus_boston)$xmin
+top_side <- st_bbox(bus_boston)$ymax # this is for adding note to the top left of map
+
+ggplot(water) +
+  geom_sf(fill = "lightblue", color = NA) +
+  geom_sf(data = bus_boston, size = 0.1,
+          aes(color = by_schools)) +
+  scale_color_manual(values = c("grey", "black"),
+          name = "Boston bus stops\nby distance to a public school", 
+          labels = c("No school within 250 m",
+                     "School within 250 m")) +
+  annotation_scale(location = "tr") +
+  annotation_north_arrow(location = "br",
+                         style = north_arrow_minimal()) +
+  annotate(geom = "text", x = left_side, 
+           y = top_side, 
+           label = paste("Of the ", 
+                         prettyNum(length(bus_boston$by_schools), big.mark = ","),
+                         " bus stops in Boston\n", 
+                         prettyNum(n_bus_schools, big.mark = ","),
+                         " (", 
+                         prettyNum(100*pct_bus_schools, digits = 0),
+                         "%) are within 250\nmeters of a public school.",
+                         sep = ""),
+           hjust = 0, vjust = 0, size = 3) +
+  theme_map() +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+
+
+```
+
+# Map 2 
+Number of bus stops within each Boston neighborhood [question 5].
+```{r}
+nhoods <- nhoods %>%
+  mutate(num_bus = lengths(st_covers(nhoods, bus_boston)))
+
+
+# which nhood has the most number of bus stops and what proportion?
+max.bus.nhood <- nhoods$Name[nhoods$num_bus == max(nhoods$num_bus)]
+max.bus <- max(nhoods$num_bus)
+prop.max.bus <- max(nhoods$num_bus)/nrow(bus_boston)
+
+# number and proportion in each nhood
+kableExtra::kable(
+  nhoods %>% group_by(Name) %>%
+  st_drop_geometry() %>% 
+  summarise(
+  "Total bus stops" = num_bus,
+  "Proportion of total stops" = round(num_bus/nrow(bus_boston)*100, 1)) %>%
+  ungroup()
+)
+
+
+```
+  
+  
+**Map 2:**
+```{r}
+ggplot(nhoods) +
+  geom_sf(color = NA, 
+          aes(fill = num_bus)) +
+  scale_fill_gradient2(name = "Boston neighborhoods\nby number of bus stops",
+                       breaks = breaks <- seq(0, 400, by = 100),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops")) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotate(geom = "text", x = left_side, 
+           y = top_side, 
+           label = paste("Of the ", 
+                         prettyNum(nrow(bus_boston), big.mark = ","),
+                         " bus stops in Boston, Dorchester has \n", 
+                         prettyNum(max.bus, big.mark = ","),
+                         " (", 
+                         prettyNum(100*prop.max.bus, digits = 0),
+                         "%) total bus stops.",
+                         sep = ""),
+           hjust = 0, vjust = 0, size = 3) +
+  theme_map() +
+  theme(legend.position = "right",
+        legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+```
+  
+  
+# Map 3
+Areal density of bus stops within each Boston neighborhood [question 19].
+```{r}
+nhoods <- nhoods %>%
+  mutate(area = set_units(st_area(nhoods), km^2)) %>%
+  mutate(bus_dens = as.numeric(num_bus / area))
+
+# which nhood has the greatest density of stops?
+max.bus.density.nhood <- nhoods$Name[nhoods$bus_dens == max(nhoods$bus_dens)]
+max.bus.density <- max(nhoods$bus_dens)
+
+# number and density in each nhood
+kableExtra::kable(
+  nhoods %>% group_by(Name) %>%
+  st_drop_geometry() %>% 
+  summarise(
+  "Total bus stops" = num_bus,
+  "Proportion of total stops" = round(num_bus/nrow(bus_boston)*100, 1),
+  "Density of stops [stops per km^2]" = round(bus_dens, 1)) %>%
+  ungroup()
+)
+
+```
+
+  
+  
+**Map 3:**
+```{r}
+ggplot(nhoods) +
+  geom_sf(color = NA, 
+          aes(fill = bus_dens)) +
+  scale_fill_gradient2(name = "Boston neighborhoods\nby bus stop density",
+                       breaks = breaks <- seq(0, 70, by = 10),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops")) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  annotate(geom = "text", x = left_side, 
+           y = top_side, 
+           label = paste("Downtown has the greatest density \n", 
+                         "of bus stops in Boston, with ", 
+                         prettyNum(round(max.bus.density, 1), big.mark = ","),
+                         " bus stops per km^2.",
+                         sep = ""),
+           hjust = 0, vjust = 0, size = 3) +
+  theme_map() +
+  theme(legend.position = "right",
+    legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+```
+
+# TBD  
+
+Next, we could add similar maps to Map 2 and 3, but with census tracts, and/or add the average number of bus stops per polygon, and/or the average distance of a bus stop to a public school. 
