@@ -1,6 +1,6 @@
 ---
-title: "assignment3_jml"
-author: "Jahred Liddie"
+title: "Assignment 3"
+author: "Jahred Liddie, J.T. Keller, "
 date: "9/18/2021"
 output: html_document
 ---
@@ -16,17 +16,43 @@ library(nngeo)
 library(kableExtra) # for making nice tables
 
 # load data
-bus <- st_read("MBTA_Bus_Stops.geojson", quiet = TRUE) # points: bus stops
-
-tracts <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/4a8eb4fb3be44ed5a1eec28551b9f3b2_0.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D", quiet = TRUE) # polgyon: census tracts
-
-nhoods <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/3525b0ee6e6b427f9aab5d0a1d0a1a28_0.kml", quiet = TRUE) # polygon: boston nhoods
-
-schools <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/1d9509a8b2fd485d9ad471ba2fdb1f90_0.geojson?outSR=%7B%22latestWkid%22%3A2249%2C%22wkid%22%3A102686%7D", quiet = TRUE)
-
-water <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/2b3c0fa13b1c468eb702a3645fcc6bcb_5.kml", quiet = TRUE)
-
-knitr::opts_chunk$set(echo = TRUE)
+  # MBTA bus stops (points)
+  bus <- st_read("MBTA_Bus_Stops.geojson", quiet = TRUE) 
+  
+  # Boston census tracts (polygons)
+  tracts <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/4a8eb4fb3be44ed5a1eec28551b9f3b2_0.geojson?outSR=%7B%22latestWkid%22%3A3857%2C%22wkid%22%3A102100%7D", quiet = TRUE) # polgyon: census tracts
+  
+    # full census tract demographic data
+    demo <- read.csv("ACS2014_2018_tract.csv") 
+    demo <- demo %>% select(GEOID, homeowner, renter, poverty) # select some data
+    demo$GEOID <- as.character(demo$GEOID) # make into character for merging
+    
+      # check GEOIDs, then merge some data with Boston tracts
+      setdiff(tracts$GEOID10, demo$GEOID)
+      tracts <- left_join(tracts, demo, by = c("GEOID10" = "GEOID")) # merge columns into tracts
+      rm(demo) # drop dataset
+      
+      # create quartiles of each of these columns as well
+      tracts <- tracts %>% 
+        mutate(q.homeowner = ifelse(!is.na(ntile(homeowner,4)), 
+                                    paste("Q", ntile(homeowner, 4), sep = ""), NA), # this lets no data be NA
+               q.renter = ifelse(!is.na(ntile(renter,4)), 
+                                    paste("Q", ntile(renter, 4), sep = ""), NA),
+               q.poverty = ifelse(!is.na(ntile(poverty,4)), 
+                                    paste("Q", ntile(poverty, 4), sep = ""), NA),
+        )
+      
+  # Boston nhoods (polygons)
+  nhoods <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/3525b0ee6e6b427f9aab5d0a1d0a1a28_0.kml", quiet = TRUE)
+  
+  # Boston public schools (points)
+  schools <- st_read("https://bostonopendata-boston.opendata.arcgis.com/datasets/1d9509a8b2fd485d9ad471ba2fdb1f90_0.geojson?outSR=%7B%22latestWkid%22%3A2249%2C%22wkid%22%3A102686%7D", quiet = TRUE)
+  
+  # Water (polygon)
+  water <- st_read("http://bostonopendata-boston.opendata.arcgis.com/datasets/2b3c0fa13b1c468eb702a3645fcc6bcb_5.kml", quiet = TRUE)
+  
+  knitr::opts_chunk$set(echo = TRUE)
+  
 ```
 
 # Transforming data
@@ -55,7 +81,7 @@ Then, trim bus stops to be just within Boston.
 ```{r, message = FALSE, warning = FALSE}
 # check validity of geometry before intersecting
 sum(st_is_valid(bus)==F)
-sum(st_is_valid(nhoods)==F)
+sum(st_is_valid(nhoods)==F) # this has one invalid geometry
 
 # make nhoods valid
 nhoods.valid <- st_make_valid(nhoods)
@@ -78,7 +104,6 @@ ggplot(nhoods) +
 ```
   
 Basic map of bus stops (black) and public schools (red).  
-
 ```{r}
 
 ggplot(water) +
@@ -138,6 +163,9 @@ So, 571 Boston bus stops are within 250 meters of a public school, representing 
   
   
 **Map 1:**
+
+[insert text]
+
 ```{r, fig.width=6, fig.height=6}
 left_side  <- st_bbox(bus_boston)$xmin
 top_side <- st_bbox(bus_boston)$ymax # this is for adding note to the top left of map
@@ -146,7 +174,7 @@ ggplot(water) +
   geom_sf(fill = "lightblue", color = NA) +
   geom_sf(data = bus_boston, size = 0.1,
           aes(color = by_schools)) +
-  scale_color_manual(values = c("grey", "black"),
+  scale_color_manual(values = c("black", "red"),
           name = "Boston bus stops\nby distance to a public school", 
           labels = c("No school within 250 m",
                      "School within 250 m")) +
@@ -199,7 +227,13 @@ kableExtra::kable(
   
   
 **Map 2:**
+
+[insert text]
+
 ```{r}
+left_side  <- st_bbox(nhoods)$xmin - 5000 # better location for text
+top_side <- st_bbox(nhoods)$ymax
+
 ggplot(nhoods) +
   geom_sf(color = NA, 
           aes(fill = num_bus)) +
@@ -253,9 +287,11 @@ kableExtra::kable(
 
 ```
 
-  
-  
+
 **Map 3:**
+
+[insert text]
+
 ```{r}
 ggplot(nhoods) +
   geom_sf(color = NA, 
@@ -282,6 +318,168 @@ ggplot(nhoods) +
                                          color = "gray"))
 ```
 
-# TBD  
+# Map 4
+Number of bus stops within each Boston census tract [question 6].
 
-Next, we could add similar maps to Map 2 and 3, but with census tracts, and/or add the average number of bus stops per polygon, and/or the average distance of a bus stop to a public school. 
+**Map 4**
+
+[insert text]
+
+```{r, fig.width=8}
+# drop census tract with all water for plotting purposes
+tracts <- subset(tracts, FID != 48)
+
+# calculate total and areal density
+tracts <- tracts %>%
+  mutate(num_bus = lengths(st_covers(tracts, bus_boston))) %>%
+  mutate(area = set_units(st_area(tracts), km^2)) %>%
+  mutate(bus_dens = as.numeric(num_bus / area))
+
+
+ggplot(tracts) +
+  geom_sf(color = NA, 
+          aes(fill = num_bus)) +
+  scale_fill_gradient2(name = "Boston census tracts\nby total bus stops",
+                       breaks = breaks <- seq(0, 50, by = 10),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops")) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  theme_map() +
+  theme(legend.position = "right",
+    legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+```
+
+**Map 4 (cont): faceting by quartile of residents under the poverty line**
+
+[insert text and note this drops census tracts with missing data]
+
+```{r, fig.width=8}
+# note: this drops any tracts with no poverty data
+ggplot(subset(tracts, !is.na(q.poverty))) +
+  geom_sf(color = NA, 
+          aes(fill = num_bus)) +
+  scale_fill_gradient2(name = "Boston census tracts\nby total bus stops",
+                       breaks = breaks <- seq(0, 50, by = 10),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops")) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  theme_map() +
+  labs(title = "Total bus stops in census tracts by quartile of residents < poverty line") +
+  theme(legend.position = "right",
+    legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray")) +
+  facet_wrap(~q.poverty)
+```
+
+# Map 5
+Areal density of bus stops in each census tract [question 20].
+
+**Map 5:**
+
+[insert text]
+
+```{r}
+
+ggplot(tracts) +
+  geom_sf(color = NA, 
+          aes(fill = bus_dens)) +
+  scale_fill_gradient2(name = "Boston census tracts\nby bus stop density",
+                       breaks = breaks <- seq(0, 100, by = 20),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops per km^2")) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  theme_map() +
+  theme(legend.position = "right",
+    legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+
+```
+
+**Map 5 (cont): areal density faceted by quartile of residents under the poverty line**
+
+[insert text and note that this drops tracts with missing data]
+
+```{r, fig.width=8}
+
+ggplot(subset(tracts, !is.na(q.poverty))) +
+  geom_sf(color = NA, 
+          aes(fill = bus_dens)) +
+  scale_fill_gradient2(name = "Boston census tracts\nby bus stop density",
+                       breaks = breaks <- seq(0, 100, by = 20),
+                       labels = paste(prettyNum(breaks, big.mark = ","),
+                                      "bus stops per km^2")) +
+  geom_sf(data = water, fill = "lightblue", color = NA) +
+  annotation_scale(location = "br") +
+  annotation_north_arrow(location = "tr",
+                         style = north_arrow_minimal()) +
+  theme_map() +
+  theme(legend.position = "right",
+    legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray")) +
+  labs(title = "Areal density of bus stops in census tracts by quartile of residents < poverty line") +
+  facet_wrap(~q.poverty)
+
+```
+
+
+# Map 6
+Illustrating the nearest bus to each school and the average overall distance [question 3].
+
+First, calculate these distances.
+```{r}
+# nearest bus and distance to each school
+schools = schools %>%
+  mutate(bus_distance = st_nn(schools, bus_boston,
+                              returnDist = TRUE)$dist) %>%
+  mutate(bus_distance = as.numeric(bus_distance))
+
+avg.dist <- mean(schools$bus_distance) # calculate average distance across all schools
+```
+
+**Map 6:**
+
+[insert text]
+
+```{r}
+right_side <- st_bbox(schools)$xmax + 5000 # small edits for plotting extent
+left_side <- st_bbox(schools)$xmin - 7000
+top_side <- st_bbox(schools)$ymax + 1000
+bottom_side <- st_bbox(schools)$ymin
+
+ggplot(water) +
+  geom_sf(fill = "lightblue", color = NA) +
+  geom_sf(data = schools, size = 1.5,
+          aes(color = bus_distance)) +
+  coord_sf(xlim = c(left_side, right_side),
+           ylim = c(bottom_side, top_side), expand = FALSE) +
+  scale_color_viridis_c(name = "Boston public schools \n by distance to a bus stop") +
+  annotation_scale(location = "tl") +
+  annotation_north_arrow(location = "br",
+                         style = north_arrow_minimal()) +
+  annotate(geom = "text", x = left_side, 
+           y = top_side, 
+           label = paste("Overall, a Boston public school is \n ", 
+                         prettyNum(avg.dist, digits = 2),
+                         " meters from a bus stop.", 
+                         sep = ""),
+           hjust = 0, vjust = 0, size = 3) +
+  theme_map() +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.background = element_rect(fill = alpha("white", 0.5), 
+                                         color = "gray"))
+
+```
+
+# Contribution statement
+
+[insert text]
